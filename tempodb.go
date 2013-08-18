@@ -20,6 +20,7 @@ const (
 	API_HOSTNAME    = "https://api.tempo-db.com"
 	API_SECURE_PORT = 443
 	ISO8601_FMT     = "2006-01-02T15:04:05.000Z0700"
+	OTHER_TIME_FMT = "2006-01-02T15:04:05.000-0700"
 	VERSION         = 0.1
 )
 
@@ -33,12 +34,12 @@ type TempoTime struct {
 }
 
 type DataPoint struct {
-	Ts *TempoTime `json:"t"`
+	Ts time.Time `json:"t"`
 	V  float64    `json:"v"`
 }
 
 type BulkDataSet struct {
-	Ts   *TempoTime  `json:"t"`
+	Ts   time.Time  `json:"t"`
 	Data []BulkPoint `json:"data"`
 }
 
@@ -66,8 +67,8 @@ type createSeriesRequest struct {
 
 type DataSet struct {
 	Series  Series             `json:"series"`
-	Start   TempoTime          `json:"start"`
-	End     TempoTime          `json:"end"`
+	Start   time.Time          `json:"start"`
+	End     time.Time          `json:"end"`
 	Data    []*DataPoint       `json:"data"`
 	Summary map[string]float64 `json:"summary"`
 }
@@ -110,26 +111,84 @@ func NewFilter() *Filter {
 	}
 }
 
-func (tt *TempoTime) MarshalJSON() ([]byte, error) {
-	formatted := fmt.Sprintf("\"%s\"", tt.Time.Format(ISO8601_FMT))
+func (bds *BulkDataSet) MarshalJSON() ([]byte, error) {
+	json_data, err := json.Marshal(bds.Data)
+	if err != nil{
+		return nil, err
+	}
+	formatted := fmt.Sprintf("{\"t\":\"%s\",\"data\":%s}",  bds.Ts.Format(ISO8601_FMT), json_data)
 	return []byte(formatted), nil
 }
 
-func (tt *TempoTime) UnmarshalJSON(data []byte) error {
+func (dp *DataPoint) MarshalJSON() ([]byte, error) {
+	formatted := fmt.Sprintf("{\"v\":%v,\"t\":\"%s\"}", dp.V, dp.Ts.Format(ISO8601_FMT))
+	return []byte(formatted), nil
+}
+
+type temporalDataPoint struct {
+	Ts string `json:"t"`
+	V  float64    `json:"v"`
+}
+
+func (dp *DataPoint) UnmarshalJSON(data []byte) error{
 	b := bytes.NewBuffer(data)
 	decoded := json.NewDecoder(b)
-	var s string
-	if err := decoded.Decode(&s); err != nil {
+	var tdp temporalDataPoint
+	if err := decoded.Decode(&tdp); err != nil{
 		return err
 	}
-	t, err := time.Parse(ISO8601_FMT, s)
+
+	dp.V = tdp.V
+	var tempTime time.Time
+	tempTime, err := time.Parse(ISO8601_FMT, tdp.Ts)
 	if err != nil {
 		return err
 	}
-	tt.Time = t
+
+	dp.Ts = tempTime
 
 	return nil
+
 }
+
+type temporalDataSet struct {
+	Series  Series             `json:"series"`
+	Start   string          `json:"start"`
+	End     string          `json:"end"`
+	Data    []*DataPoint       `json:"data"`
+	Summary map[string]float64 `json:"summary"`
+}
+
+func (ds *DataSet) UnmarshalJSON(data []byte) error{
+	b := bytes.NewBuffer(data)
+	decoded := json.NewDecoder(b)
+	var tds temporalDataSet
+	if err := decoded.Decode(&tds); err != nil{
+		return err
+	}
+
+	ds.Series = tds.Series
+	ds.Data = tds.Data
+	ds.Summary =  tds.Summary
+
+	var tempStart time.Time
+	tempStart, err := time.Parse(ISO8601_FMT, tds.Start)
+	if err != nil {
+		return err
+	}
+
+	var tempEnd time.Time
+	tempEnd, err = time.Parse(ISO8601_FMT, tds.End)
+	if err != nil {
+		return err
+	}
+
+	ds.Start = tempStart
+	ds.End = tempEnd
+	return nil
+
+}
+
 
 func (filter *Filter) AddId(id string) {
 	filter.Ids = append(filter.Ids, id)
@@ -253,7 +312,7 @@ func (client *Client) WriteKey(key string, data []*DataPoint) error {
 func (client *Client) WriteBulk(ts time.Time, data []BulkPoint) error {
 	url := client.buildUrl("/data/", "", "")
 	dataSet := &BulkDataSet{
-		Ts:   &TempoTime{Time: ts},
+		Ts:    ts,
 		Data: data,
 	}
 	b, err := json.Marshal(dataSet)
@@ -294,6 +353,7 @@ func (client *Client) Read(start time.Time, end time.Time, filter *Filter) ([]*D
 	err = json.Unmarshal(b, &datasets)
 	if err != nil {
 		return nil, err
+
 	}
 
 	return datasets, nil
@@ -318,7 +378,7 @@ func (client *Client) IncrementKey(key string, data []*DataPoint) error {
 func (client *Client) IncrementBulk(ts time.Time, data []BulkPoint) error {
 	url := client.buildUrl("/increment/", "", "")
 	dataSet := &BulkDataSet{
-		Ts:   &TempoTime{Time: ts},
+		Ts:    ts,
 		Data: data,
 	}
 	b, err := json.Marshal(dataSet)

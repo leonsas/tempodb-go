@@ -46,6 +46,36 @@ func NewTestClient(resp *http.Response) (*Client, *MockRemoter) {
 	return client, remoter
 }
 
+func TestUnmarshalDataPoint(t *testing.T){
+	dp_json :=    `{
+	"t": "2012-01-08T00:00:00.000+0000", 
+	"v": 4.0
+		 }`
+    var dp DataPoint
+ 	b := []byte(dp_json)
+    err := json.Unmarshal(b, &dp)
+	if err != nil {
+		t.Error(err)
+		return
+	}
+
+	if dp.V != 4.0 {
+	t.Errorf("Expected dp.V to be %f, but was %f", 4.0, dp.V)
+		return
+	}
+	
+	OTHER_TIME_FMT := "2006-01-02T15:04:05.000-0700"
+	expectedTime, _ := time.Parse(OTHER_TIME_FMT, "2012-01-08T00:00:00.000+0000")
+	
+	expectedTString := expectedTime.Format(OTHER_TIME_FMT)
+	dpTString := dp.Ts.Format(OTHER_TIME_FMT)
+	if dpTString != expectedTString{
+		t.Errorf("Expected dp.Ts to be %s, but was %s", expectedTString, dpTString)
+		return
+	}
+	
+}
+
 func TestRegexMatching(t *testing.T) {
 	client, _ := NewTestClient(&http.Response{StatusCode: 200, Body: makeBody(testFixture("create_series.json"))})
 	_, err := client.CreateSeries("#")
@@ -258,7 +288,7 @@ func TestWriteKey(t *testing.T) {
 
 		return
 	}
-
+	
 	req := remoter.LastRequest()
 	b, err := ioutil.ReadAll(req.Body)
 	if err != nil {
@@ -266,8 +296,13 @@ func TestWriteKey(t *testing.T) {
 
 		return
 	}
-	var ds []DataSet
-	err = json.Unmarshal(b, &ds)
+	/*
+	if string(b) != "" {
+		t.Errorf("Expected \"\", got %s", b)
+	}*/
+	
+	var dps []DataPoint
+	err = json.Unmarshal(b, &dps)
 	if err != nil {
 		t.Error(err)
 
@@ -308,8 +343,8 @@ func TestWriteId(t *testing.T) {
 
 		return
 	}
-	var ds []DataSet
-	err = json.Unmarshal(b, &ds)
+	var dps []DataPoint
+	err = json.Unmarshal(b, &dps)
 	if err != nil {
 		t.Error(err)
 
